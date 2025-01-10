@@ -25,8 +25,9 @@ urlencode() {
 }
 
 # Check arguments
-if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
-    echo "Usage: $0 <username> <password> <host> [--otp]"
+if [ "$#" -lt 3 ] || [ "$#" -gt 5 ]; then
+    echo "Usage: $0 <username> <password> <host> [--otp] [--port PORT]"
+    echo "Example: $0 user pass vpn.example.com --otp --port 10443"
     exit 1
 fi
 
@@ -35,16 +36,37 @@ USERNAME=$(urlencode "$1")
 PASSWORD=$(urlencode "$2")
 HOST=$(urlencode "$3")
 OTP_ENABLED=false
+PORT=443  # Default port
 
-if [ "$4" = "--otp" ]; then
-    OTP_ENABLED=true
-fi
+# Parse optional arguments
+shift 3
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --otp)
+            OTP_ENABLED=true
+            ;;
+        --port)
+            if [ -n "$2" ] && [ "$2" -eq "$2" ] 2>/dev/null; then
+                PORT="$2"
+                shift
+            else
+                echo "Error: --port requires a numeric value"
+                exit 1
+            fi
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 # Decode the credentials for the config file
 USERNAME=$(printf '%b' "${USERNAME//%/\\x}")
 PASSWORD=$(printf '%b' "${PASSWORD//%/\\x}")
 HOST=$(printf '%b' "${HOST//%/\\x}")
-TRUSTEDCERT=$(openssl s_client -connect ${HOST}:443 -servername ${HOST} < /dev/null 2>/dev/null | openssl x509 -fingerprint -sha256 -noout | sed 's/://g' | awk -F= '{print tolower($2)}')
+TRUSTEDCERT=$(openssl s_client -connect ${HOST}:${PORT} -servername ${HOST} < /dev/null 2>/dev/null | openssl x509 -fingerprint -sha256 -noout | sed 's/://g' | awk -F= '{print tolower($2)}')
 
 # Install required packages
 echo "Installing required packages..."
@@ -158,10 +180,12 @@ class FortiVPNApplet:
                         key, value = [x.strip() for x in line.split('=', 1)]
                         config[key] = value
                 self.vpn_host = config.get('host', 'Unknown Host')
+                self.vpn_port = config.get('port', '443')
                 self.otp_required = config.get('otp', '0') == '1'
         except Exception as e:
             logging.error(f"Error reading config: {e}")
             self.vpn_host = 'Unknown Host'
+            self.vpn_port = '443'
             self.otp_required = False
         
         # Create indicator
@@ -325,13 +349,14 @@ class FortiVPNApplet:
     def test_connection(self, _):
         def run_test():
             try:
-                # Try to ping the VPN gateway using the stored host
+                # Try to establish a TCP connection to the VPN gateway
+                logging.info(f"Testing connection to {self.vpn_host}:{self.vpn_port}")
                 result = subprocess.run(
-                    ["ping", "-c", "1", self.vpn_host],
+                    ["nc", "-zv", "-w", "5", self.vpn_host, self.vpn_port],
                     capture_output=True,
                     text=True
                 )
-                
+
                 dialog = Gtk.MessageDialog(
                     transient_for=None,
                     flags=0,
@@ -339,22 +364,24 @@ class FortiVPNApplet:
                     buttons=Gtk.ButtonsType.OK,
                     text="Connection Test Results"
                 )
-                
+
                 if result.returncode == 0:
                     dialog.format_secondary_text(
-                        "VPN connection is working properly!\n" +
-                        f"Response time: {result.stdout.split('time=')[1].split()[0]}"
+                        f"Successfully connected to VPN gateway\nHost: {self.vpn_host}\nPort: {self.vpn_port}"
                     )
+                    logging.info("Connection test successful")
                 else:
                     dialog.format_secondary_text(
-                        "Could not reach VPN gateway.\n" +
+                        f"Could not reach VPN gateway at {self.vpn_host}:{self.vpn_port}\n" +
                         "Please check your connection."
                     )
-                
+                    logging.warning("Connection test failed")
+
                 dialog.run()
                 dialog.destroy()
-            
+
             except Exception as e:
+                logging.error(f"Error during connection test: {e}")
                 error_dialog = Gtk.MessageDialog(
                     transient_for=None,
                     flags=0,
@@ -439,6 +466,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+EOF
 EOF
 
 # Make the applet executable
