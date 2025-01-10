@@ -17,8 +17,7 @@ urlencode() {
         c=${string:$pos:1}
         case "$c" in
             [-_.~a-zA-Z0-9] ) o="${c}" ;;
-            * )               printf -v o '%%%02x' "'$c"
-        esac
+            * )               printf -v o '%%%02x' "'$c" esac
         encoded+="${o}"
     done
     echo "${encoded}"
@@ -42,17 +41,17 @@ PORT=443  # Default port
 shift 3
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --otp)
-            OTP_ENABLED=true
-            ;;
         --port)
-            if [ -n "$2" ] && [ "$2" -eq "$2" ] 2>/dev/null; then
+            if [ -n "$2" ]; then
                 PORT="$2"
                 shift
             else
-                echo "Error: --port requires a numeric value"
+                echo "Error: --port requires a value"
                 exit 1
             fi
+            ;;
+        --otp)
+            OTP_ENABLED=true
             ;;
         *)
             echo "Unknown option: $1"
@@ -73,31 +72,38 @@ echo "Installing required packages..."
 apt-get update
 apt-get install -y openfortivpn python3-gi gir1.2-appindicator3-0.1 python3-pip
 
+# Add current user to systemd-journal group
+REAL_USER=$(who | awk '{print $1}' | head -n1)
+if [ -n "$REAL_USER" ]; then
+    echo "Adding $REAL_USER to systemd-journal group..."
+    usermod -a -G systemd-journal "$REAL_USER"
+    # Inform user they need to log out and back in
+    echo "NOTE: Please log out and log back in for the group changes to take effect"
+fi
+
 # Create necessary directories
 mkdir -p /etc/openfortivpn
 mkdir -p /usr/local/bin
 mkdir -p /etc/systemd/system
 
-# Create OpenFortiVPN configuration using printf to handle special characters
+# Update the configuration file creation
 if [ "$OTP_ENABLED" = true ]; then
-    printf "host = %s\nport = 443\nusername = %s\npassword = %s\ntrusted-cert = %s\notp = 1\n" \
-        "$HOST" "$USERNAME" "$PASSWORD" "$TRUSTEDCERT" > /etc/openfortivpn/vpn.conf
+    printf "host = %s\nport = %s\nusername = %s\npassword = %s\ntrusted-cert = %s\notp = 1\n" \
+        "$HOST" "$PORT" "$USERNAME" "$PASSWORD" "$TRUSTEDCERT" > /etc/openfortivpn/vpn.conf
 else
-    printf "host = %s\nport = 443\nusername = %s\npassword = %s\ntrusted-cert = %s\n" \
-        "$HOST" "$USERNAME" "$PASSWORD" "$TRUSTEDCERT" > /etc/openfortivpn/vpn.conf
+    printf "host = %s\nport = %s\nusername = %s\npassword = %s\ntrusted-cert = %s\n" \
+        "$HOST" "$PORT" "$USERNAME" "$PASSWORD" "$TRUSTEDCERT" > /etc/openfortivpn/vpn.conf
 fi
 
 # Set proper permissions for the config file
 chmod 600 /etc/openfortivpn/vpn.conf
 
-# Create a public file with just the host and OTP info
-mkdir -p /var/lib/openfortivpn
+# Update the public configuration file
 if [ "$OTP_ENABLED" = true ]; then
-    printf "host = %s\notp = 1\n" "$HOST" > /var/lib/openfortivpn/config.public
+    printf "host = %s\nport = %s\notp = 1\n" "$HOST" "$PORT" > /var/lib/openfortivpn/config.public
 else
-    printf "host = %s\notp = 0\n" "$HOST" > /var/lib/openfortivpn/config.public
+    printf "host = %s\nport = %s\notp = 0\n" "$HOST" "$PORT" > /var/lib/openfortivpn/config.public
 fi
-chmod 644 /var/lib/openfortivpn/config.public
 
 # Install systemd service
 cat > /etc/systemd/system/openfortivpn@.service << EOF
