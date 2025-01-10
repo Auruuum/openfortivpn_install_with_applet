@@ -105,6 +105,17 @@ gi.require_version('AppIndicator3', '0.1')
 from gi.repository import Gtk, AppIndicator3, GLib
 import subprocess
 import os
+import logging
+import tempfile
+from datetime import datetime
+
+# Set up logging
+log_file = os.path.join(tempfile.gettempdir(), 'openfortivpn-applet.log')
+logging.basicConfig(
+    filename=log_file,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 class OTPDialog(Gtk.Dialog):
     def __init__(self, parent=None):
@@ -135,6 +146,7 @@ class OTPDialog(Gtk.Dialog):
 class FortiVPNApplet:
     def __init__(self, service_name):
         self.service_name = service_name
+        logging.info("Initializing FortiVPN Applet")
         
         # Read public config file
         try:
@@ -148,7 +160,7 @@ class FortiVPNApplet:
                 self.vpn_host = config.get('host', 'Unknown Host')
                 self.otp_required = config.get('otp', '0') == '1'
         except Exception as e:
-            print(f"Error reading config: {e}")
+            logging.error(f"Error reading config: {e}")
             self.vpn_host = 'Unknown Host'
             self.otp_required = False
         
@@ -168,7 +180,9 @@ class FortiVPNApplet:
         GLib.timeout_add_seconds(2, self.update_status)
     
     def start_service_with_otp(self, _):
+        logging.info("Attempting to start VPN service")
         if self.otp_required:
+            logging.info("OTP required, showing dialog")
             dialog = OTPDialog()
             response = dialog.run()
             
@@ -224,9 +238,13 @@ class FortiVPNApplet:
         
         self.menu.append(Gtk.SeparatorMenuItem())
         
-        logs_item = Gtk.MenuItem(label="View VPN Logs")
-        logs_item.connect("activate", self.view_logs)
-        self.menu.append(logs_item)
+        vpn_logs_item = Gtk.MenuItem(label="View VPN Service Logs")
+        vpn_logs_item.connect("activate", self.view_vpn_logs)
+        self.menu.append(vpn_logs_item)
+        
+        app_logs_item = Gtk.MenuItem(label="View Applet Logs")
+        app_logs_item.connect("activate", self.view_app_logs)
+        self.menu.append(app_logs_item)
         
         ping_item = Gtk.MenuItem(label="Test Connection")
         ping_item.connect("activate", self.test_connection)
@@ -276,7 +294,7 @@ class FortiVPNApplet:
                             return ip
             return "Not Connected"
         except Exception as e:
-            print(f"Error getting VPN IP: {e}")
+            logging.error(f"Error getting VPN IP: {e}")
             return "Not Connected"
             
     def get_service_status(self):
@@ -356,6 +374,7 @@ class FortiVPNApplet:
         try:
             status = self.get_service_status()
             vpn_ip = self.get_vpn_ip()
+            logging.debug(f"Status update - Status: {status}, IP: {vpn_ip}")
             
             # Update status label with more user-friendly text
             if status == "active":
@@ -397,9 +416,14 @@ class FortiVPNApplet:
         self.run_systemctl('restart')
         self.update_status()
     
-    def view_logs(self, _):
+    def view_vpn_logs(self, _):
+        logging.info("Opening VPN service logs")
         subprocess.Popen(['gnome-terminal', '--', 'journalctl', '-u', 
                          self.service_name, '-f'])
+
+    def view_app_logs(self, _):
+        logging.info("Opening applet logs")
+        subprocess.Popen(['gnome-terminal', '--', 'tail', '-f', log_file])
     
     def quit(self, _):
         Gtk.main_quit()
