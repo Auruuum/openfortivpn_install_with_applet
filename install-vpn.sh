@@ -467,7 +467,6 @@ def main():
 if __name__ == "__main__":
     main()
 EOF
-EOF
 
 # Make the applet executable
 chmod +x /usr/local/bin/systemd-applet.py
